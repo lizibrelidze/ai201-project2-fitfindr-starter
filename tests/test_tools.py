@@ -145,3 +145,63 @@ def test_create_fit_card_does_not_call_llm_when_outfit_empty(mock_get_client):
     mock_get_client.return_value = mock_client
     create_fit_card("", SAMPLE_NEW_ITEM)
     mock_client.chat.completions.create.assert_not_called()
+
+
+# ── planning loop (run_agent) ─────────────────────────────────────────────────
+
+@patch("tools._get_groq_client")
+def test_run_agent_no_results_returns_error_without_calling_llm(mock_get_client):
+    # The critical test: no-match path must not call suggest_outfit or create_fit_card
+    mock_client = _mock_groq("should not be reached")
+    mock_get_client.return_value = mock_client
+
+    session = run_agent("designer ballgown size XXS under $5", get_example_wardrobe())
+
+    assert session["error"] is not None
+    assert session["outfit_suggestion"] is None
+    assert session["fit_card"] is None
+    mock_client.chat.completions.create.assert_not_called()
+
+
+@patch("tools._get_groq_client")
+def test_run_agent_happy_path_populates_all_fields(mock_get_client):
+    mock_get_client.return_value = _mock_groq("Outfit and caption text here.")
+
+    session = run_agent("vintage graphic tee under $30", get_example_wardrobe())
+
+    assert session["error"] is None
+    assert session["selected_item"] is not None
+    assert isinstance(session["outfit_suggestion"], str) and session["outfit_suggestion"]
+    assert isinstance(session["fit_card"], str) and session["fit_card"]
+
+
+@patch("tools._get_groq_client")
+def test_run_agent_selected_item_matches_search_results(mock_get_client):
+    mock_get_client.return_value = _mock_groq("Some outfit suggestion.")
+
+    session = run_agent("vintage denim jeans", get_example_wardrobe())
+
+    assert session["selected_item"] == session["search_results"][0]
+
+
+@patch("tools._get_groq_client")
+def test_run_agent_price_filter_respected(mock_get_client):
+    mock_get_client.return_value = _mock_groq("Some outfit suggestion.")
+
+    session = run_agent("tops under $20", get_example_wardrobe())
+
+    if session["selected_item"]:
+        assert session["selected_item"]["price"] <= 20
+
+
+@patch("tools._get_groq_client")
+def test_run_agent_different_queries_select_different_items(mock_get_client):
+    mock_get_client.return_value = _mock_groq("Generic suggestion.")
+
+    session_a = run_agent("vintage graphic tee", get_example_wardrobe())
+    session_b = run_agent("corduroy pants", get_example_wardrobe())
+
+    # Both succeed but land on different items — loop is query-driven not hardcoded
+    assert session_a["error"] is None
+    assert session_b["error"] is None
+    assert session_a["selected_item"]["id"] != session_b["selected_item"]["id"]
