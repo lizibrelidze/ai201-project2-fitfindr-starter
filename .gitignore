@@ -1,5 +1,6 @@
 # API keys — never commit these
 .env
+GROQ_API_KEY=REMOVED
 
 # Python
 __pycache__/
